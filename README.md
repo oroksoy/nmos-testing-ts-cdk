@@ -1,4 +1,4 @@
-# Welcome to the CDK Java project for the NMOS testing tool in the cloud!
+# Welcome to the CDK Typescript project for the NMOS testing tool in the cloud!
 
 There are several prerequisites before staring to work with the CDK.
 
