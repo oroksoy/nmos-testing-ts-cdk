@@ -140,6 +140,7 @@ CONFIG.PORT_BASE = ${nmostestport}`
       taskDefinition: sidecarTaskDefinition,
     });
 
+    
     //update the security group for the EFS volume to allow the Service to connect to the EFS volume
     fileSystem.connections.allowDefaultPortFrom(sidecarContainerService.service);
 
