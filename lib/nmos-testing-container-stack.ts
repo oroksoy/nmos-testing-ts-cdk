@@ -1,11 +1,10 @@
 
-import { Vpc } from '@aws-cdk/aws-ec2';
+import { Instance, InstanceType, InstanceClass, InstanceSize, Vpc, AmazonLinuxImage, AmazonLinuxGeneration, AmazonLinuxCpuType, SecurityGroup, Peer, Port, SubnetType, MultipartUserData} from '@aws-cdk/aws-ec2';
 import { Cluster } from '@aws-cdk/aws-ecs';
 import { FileSystem } from '@aws-cdk/aws-efs';
 import { PrivateDnsNamespace, Service } from '@aws-cdk/aws-servicediscovery';
-import { NestedStack, NestedStackProps, Construct } from '@aws-cdk/core'
+import { NestedStack, NestedStackProps, Construct, Duration, RemovalPolicy } from '@aws-cdk/core'
 import { LogGroup } from '@aws-cdk/aws-logs';
-import { Duration, RemovalPolicy } from '@aws-cdk/core';
 import { FargateTaskDefinition, ContainerImage, LogDriver } from '@aws-cdk/aws-ecs'
 import { ApplicationLoadBalancedFargateService } from '@aws-cdk/aws-ecs-patterns'
 import { Repository } from '@aws-cdk/aws-ecr'
@@ -19,7 +18,9 @@ interface ContainerProps extends NestedStackProps {
     hostedZoneNamespace: PrivateDnsNamespace
     cluster: Cluster,
     testEnvironment : {[key:string] : string},
-    nmostestport: number
+    nmostestport: number,
+    nmosregistryport: number,
+    nmosnodeport: number
 }
 
 export class NmosTestingContainerStack extends NestedStack {
@@ -95,7 +96,48 @@ export class NmosTestingContainerStack extends NestedStack {
         });
         
         sidecarContainerService.service.taskDefinition.taskRole.attachInlinePolicy(accessPolicy);
-    
+
+        const ami = new AmazonLinuxImage({
+            generation: AmazonLinuxGeneration.AMAZON_LINUX_2,
+            cpuType: AmazonLinuxCpuType.ARM_64
+          });
+
+
+        const mySecurityGroup = new SecurityGroup(this, 'SecurityGroup', {
+            vpc: props.vpc,
+            description: 'Allow ssh access to ec2 instances',
+            allowAllOutbound: true   // Can be set to false
+          });
+        mySecurityGroup.addIngressRule(Peer.anyIpv4(), Port.tcp(22), 'allow ssh access from the world');
+
+
+        let mountPoint = '/mnt/efs/fs';
+        
+        const userDataScript = `
+#!/bin/bash
+
+sudo su
+yum install -y amazon-efs-utils
+yum install -y nfs-utils
+file_system_id=${fileSystem.fileSystemId}
+efs_mount_point=${mountPoint}
+sudo mkdir -p $efs_mount_point
+test -f /sbin/mount.efs && echo ${fileSystem.fileSystemId}:/ ${mountPoint} efs defaults,_netdev >> /etc/fstab || echo ${fileSystem.fileSystemId}.efs.us-east-2.amazonaws.com:/ ${mountPoint} nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,_netdev 0 0 >> /etc/fstab
+mount -a -t efs,nfs4 defaults
+`     
+
+        const instance = new Instance(this, 'test-instance', {
+            vpc: props.vpc,
+            instanceType: InstanceType.of(InstanceClass.T4G, InstanceSize.MICRO),
+            machineImage: ami,
+            securityGroup: mySecurityGroup,
+            vpcSubnets: {subnetType: SubnetType.PUBLIC},
+            keyName: 'nmos-keypair'
+        })
+
+        fileSystem.connections.allowDefaultPortFrom(instance);
+        instance.addUserData(userDataScript)
+
 
 
         //////////// Creating Testing service
@@ -157,13 +199,13 @@ export class NmosTestingContainerStack extends NestedStack {
         })
 
 
-        ////////////////////////////Next Service
+        ////////////////////////////Registry Service
         //create the Easy NMOS Registry service
         const registryTaskDefinition = new FargateTaskDefinition(this, "registryDefinition");
         const registryContainer = registryTaskDefinition.addContainer("registryContainer", {
             image: ContainerImage.fromRegistry("registry.hub.docker.com/rhastie/nmos-cpp"),
             environment: props.testEnvironment,
-            portMappings: [{containerPort: 8010}],
+            portMappings: [{containerPort: props.nmosregistryport}],
             logging: LogDriver.awsLogs({
                 streamPrefix: 'Registry'
                 ,logGroup: testingLogGroup
@@ -171,10 +213,11 @@ export class NmosTestingContainerStack extends NestedStack {
         })
 
         const registryEFSVolume = {
-            name: "testingVolume",
+            name: "registryVolume",
             efsVolumeConfiguration: {
                 fileSystemId: fileSystem.fileSystemId,
-                rootDirectory: '/easy-nmos-registry'
+
+                rootDirectory: '/easy-nmos-registry/config.json'
             }
         }
         registryTaskDefinition.addVolume(registryEFSVolume);
@@ -191,7 +234,7 @@ export class NmosTestingContainerStack extends NestedStack {
         fileSystem.connections.allowDefaultPortFrom(registryFargateService.service);
 
         registryContainer.addMountPoints({
-            containerPath: "/home",
+            containerPath: "/home/registry.json",
             readOnly: false,
             sourceVolume: registryEFSVolume.name
         });
@@ -209,25 +252,50 @@ export class NmosTestingContainerStack extends NestedStack {
             service : registryDnsService
         })
 
-/*    
+/*
+        ////////////Virtual Node Service
         //create the Virtual Node container from Easy NMOS
         let environment : {[key:string] : string} = {};
         environment["RUN_NODE"] = "TRUE";
 
-        const virtualNodeFargateService = new ApplicationLoadBalancedFargateService(this, "nmosVirtualNodeFargateService", {
+        const nodeTaskDefinition = new FargateTaskDefinition(this, "nodeDefinition");
+        const nodeContainer = nodeTaskDefinition.addContainer("nodeContainer", {
+            image: ContainerImage.fromRegistry("registry.hub.docker.com/rhastie/nmos-cpp"),
+            environment: props.testEnvironment,
+            portMappings: [{containerPort: props.nmosnodeport}],
+            logging: LogDriver.awsLogs({
+                streamPrefix: 'Node'
+                ,logGroup: testingLogGroup
+            }),
+        })
+
+        const nodeEFSVolume = {
+            name: "nodeVolume",
+            efsVolumeConfiguration: {
+                fileSystemId: fileSystem.fileSystemId,
+                rootDirectory: '/easy-nmos-node/config.json'
+            }
+        }
+
+        nodeTaskDefinition.addVolume(nodeEFSVolume);
+
+        const nodeFargateService = new ApplicationLoadBalancedFargateService(this, "nmosVirtualNodeFargateService", {
             cluster: props.cluster,
             openListener : true,
             publicLoadBalancer : true,
             serviceName : "nmos-virtnode",
-            taskImageOptions: {
-                image: ContainerImage.fromRegistry("registry.hub.docker.com/rhastie/nmos-cpp"),
-                environment : environment,
-                containerPort : 11000
-            }
+            taskDefinition: nodeTaskDefinition
         });
 
-        virtualNodeFargateService.node.addDependency(sidecarContainerService);
+        fileSystem.connections.allowDefaultPortFrom(nodeFargateService.service);
 
+        nodeContainer.addMountPoints({
+            containerPath: "/home/config.json",
+            readOnly: false,
+            sourceVolume: nodeEFSVolume.name
+        });
+
+        nodeFargateService.node.addDependency(sidecarContainerService);
 
         //set the DNS SD settings for the virtual node
         const virtualNodeDnsService = new Service(this, "nmos-virtnode", {
@@ -236,9 +304,11 @@ export class NmosTestingContainerStack extends NestedStack {
             dnsTtl : Duration.seconds(10)
         })
 
-        virtualNodeFargateService.service.associateCloudMapService({
+        nodeFargateService.service.associateCloudMapService({
             service : virtualNodeDnsService
         })
-*/  
+
+ */       
+
     }  
 }
