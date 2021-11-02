@@ -16,13 +16,20 @@ export class NMOSTestingStack extends Stack {
 
         const domain = "nmos-test";
         const nmostestport = 4000;
+        const nmosregistryport = 8010;
+        const nmosnodeport = 11000;
         let testEnvironment : {[key:string] : string} = {};
 
         this.base = new NmosTestingBaseStack(this, "BaseStack", {domain: domain});
         const {vpc, hostedZoneNamespace, cluster } = this.base;
 
         console.log(testEnvironment);
-        this.appconfig = new NmosTestingAppConfigStack(this, "AppConfigStack", {domain:domain, nmostestport: nmostestport, testEnvironment: testEnvironment});
+        this.appconfig = new NmosTestingAppConfigStack(this, "AppConfigStack", {
+            domain:domain, 
+            nmostestport: nmostestport,
+            registryport: nmosregistryport,
+            nodeport: nmosnodeport, 
+            testEnvironment: testEnvironment});
         console.log(testEnvironment);
         
         this.containers = new NmosTestingContainerStack(this, "ContainerSTack", {
@@ -31,12 +38,14 @@ export class NMOSTestingStack extends Stack {
             hostedZoneNamespace: hostedZoneNamespace,
             cluster: cluster,
             testEnvironment: testEnvironment,
-            nmostestport: nmostestport
+            nmostestport: nmostestport,
+            nmosregistryport: nmosregistryport,
+            nmosnodeport: nmosnodeport
         })
         console.log(testEnvironment);
 
-        //this.containers.addDependency(this.base);
-        //this.containers.addDependency(this.appconfig);
+        this.containers.addDependency(this.base);
+        this.containers.addDependency(this.appconfig);
         
     }
 

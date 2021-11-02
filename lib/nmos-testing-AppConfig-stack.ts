@@ -6,9 +6,11 @@ import { NestedStackProps } from '@aws-cdk/core';
 
 
 interface AppConfigProps extends NestedStackProps {
-    domain : string;
-    nmostestport: number;
-    testEnvironment: {[key:string] : string };
+    domain : string,
+    nmostestport: number,
+    registryport: number,
+    nodeport: number,
+    testEnvironment: {[key:string] : string },
 }
 
 export class NmosTestingAppConfigStack extends cdk.NestedStack {
@@ -101,7 +103,7 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
     "logging_level": 0,
     "http_trace": false,
     "label": "nvidia-container",
-    "http_port": 8010,
+    "http_port": ${props.registryport},
     "query_ws_port": 8011,
     "registration_expiry_interval": 12,
     "domain":${props.domain}
@@ -131,7 +133,7 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
             content: `
 {
     "logging_level": 0,
-    "http_port": 11000,
+    "http_port": ${props.nodeport},
     "events_ws_port": 11001,
     "label": "nvidia-container-node",
     "how_many": 5,
