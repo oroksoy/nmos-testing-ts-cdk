@@ -1,14 +1,15 @@
 
 import { Instance, InstanceType, InstanceClass, InstanceSize, Vpc, AmazonLinuxImage, AmazonLinuxGeneration, AmazonLinuxCpuType, SecurityGroup, Peer, Port, SubnetType, MultipartUserData} from '@aws-cdk/aws-ec2';
-import { Cluster } from '@aws-cdk/aws-ecs';
+import { Cluster, FargateService } from '@aws-cdk/aws-ecs';
 import { FileSystem } from '@aws-cdk/aws-efs';
 import { PrivateDnsNamespace, Service } from '@aws-cdk/aws-servicediscovery';
 import { NestedStack, NestedStackProps, Construct, Duration, RemovalPolicy } from '@aws-cdk/core'
 import { LogGroup } from '@aws-cdk/aws-logs';
-import { FargateTaskDefinition, ContainerImage, LogDriver } from '@aws-cdk/aws-ecs'
-import { ApplicationLoadBalancedFargateService } from '@aws-cdk/aws-ecs-patterns'
+import { FargateTaskDefinition, ContainerImage, LogDriver, ContainerDependency, ContainerDependencyCondition, Host } from '@aws-cdk/aws-ecs'
+import { ApplicationLoadBalancedFargateService, ApplicationLoadBalancedServiceRecordType, ApplicationMultipleTargetGroupsFargateService } from '@aws-cdk/aws-ecs-patterns'
 import { Repository } from '@aws-cdk/aws-ecr'
 import { Policy, PolicyStatement } from '@aws-cdk/aws-iam'
+import { ApplicationLoadBalancer, ListenerCondition } from '@aws-cdk/aws-elasticloadbalancingv2'
 
 
 
@@ -18,6 +19,7 @@ interface ContainerProps extends NestedStackProps {
     hostedZoneNamespace: PrivateDnsNamespace
     cluster: Cluster,
     testEnvironment : {[key:string] : string},
+    sidecarport: number,
     nmostestport: number,
     nmosregistryport: number,
     nmosnodeport: number
@@ -32,18 +34,6 @@ export class NmosTestingContainerStack extends NestedStack {
             removalPolicy: RemovalPolicy.DESTROY
         })
 
-        const sidecarTaskDefinition = new FargateTaskDefinition(this, "sidecarTaskDefinition");
-
-        const sidecarContainer = sidecarTaskDefinition.addContainer("sidecarContainer", {
-            image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository", "sidecar-container")),
-            environment: props.testEnvironment,
-            portMappings: [{containerPort: 3000}],
-            logging: LogDriver.awsLogs({
-                streamPrefix: 'Sidecar',
-                logGroup: sidecarLogGroup
-            }),
-        });
-
         const fileSystem = new FileSystem(this, 'config-filesystem',{
             vpc: props.vpc,
             removalPolicy: RemovalPolicy.DESTROY
@@ -55,29 +45,8 @@ export class NmosTestingContainerStack extends NestedStack {
                 fileSystemId: fileSystem.fileSystemId,
             }
         }
-        sidecarTaskDefinition.addVolume(efsVolume);
-    
-        //Create the sidecar container that is going to write all the configuration files
-        const sidecarContainerService = new ApplicationLoadBalancedFargateService(this, "sidecarService", {
-            cluster: props.cluster,
-            openListener : true,
-            publicLoadBalancer : true,
-            serviceName : "sidecar-service",
-            taskDefinition: sidecarTaskDefinition,
-        });
-    
-    
-        //update the security group for the EFS volume to allow the Service to connect to the EFS volume
-        fileSystem.connections.allowDefaultPortFrom(sidecarContainerService.service);
-    
-        //mount the Volume from the sidecar container in the sidecar container task definition
-        sidecarContainer.addMountPoints({
-            containerPath: "/nmosConfigs",
-            readOnly: false,
-            sourceVolume: efsVolume.name
-            //sourceVolume: containerVolume.name
-        });
-        
+
+        ///////////////AppConfig Access Policy setup
         //create the service first then find the default task role created for the service then modify the policy for that role
         // Create the access policy
         const accessStatement1 = new PolicyStatement({
@@ -94,9 +63,8 @@ export class NmosTestingContainerStack extends NestedStack {
         const accessPolicy = new Policy(this, "AccessPolicy", {
             statements: [accessStatement1]
         });
-        
-        sidecarContainerService.service.taskDefinition.taskRole.attachInlinePolicy(accessPolicy);
 
+        ///////////////////////////Test Instance setup
         const ami = new AmazonLinuxImage({
             generation: AmazonLinuxGeneration.AMAZON_LINUX_2,
             cpuType: AmazonLinuxCpuType.ARM_64
@@ -140,23 +108,55 @@ mount -a -t efs,nfs4 defaults
 
 
 
-        //////////// Creating Testing service
+        //////////// Creating Testing service        
         const testingLogGroup = new LogGroup(this, "nmos-test-log-group",{
             removalPolicy: RemovalPolicy.DESTROY
         })
-        
-        const testingTaskDefinition = new FargateTaskDefinition(this, "testingTaskDefinition");
 
+        const testingTaskDefinition = new FargateTaskDefinition(this, "testingTaskDefinition");
+        
         const testingContainer = testingTaskDefinition.addContainer("testingContainer", {
             image: ContainerImage.fromRegistry("registry.hub.docker.com/amwa/nmos-testing"),
             environment: props.testEnvironment,
             portMappings: [{containerPort: props.nmostestport}],
             logging: LogDriver.awsLogs({
-            streamPrefix: 'Testing'
-            ,logGroup: testingLogGroup
+                streamPrefix: 'Testing'
+                ,logGroup: testingLogGroup
             }),
+            //healthCheck: {command: [ "CMD-SHELL", `curl -f http://localhost:${props.nmosnodeport}/ || exit 1` ]}
         });
-    
+
+        const sidecarContainer = testingTaskDefinition.addContainer("sidecarContainer", {
+            image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository", "sidecar-container")),
+            environment: props.testEnvironment,
+            portMappings: [{containerPort: props.sidecarport}],
+            logging: LogDriver.awsLogs({
+                streamPrefix: 'Sidecar',
+                logGroup: sidecarLogGroup
+            }),
+            healthCheck: {command: [ "CMD-SHELL", `curl -f http://localhost:${props.sidecarport}/ || exit 1` ]}
+        });
+
+        testingContainer.addContainerDependencies({
+            container: sidecarContainer, 
+            condition: ContainerDependencyCondition.HEALTHY
+        })
+
+        const hostVolume = {
+            name: "hostVolume",
+            host: {}
+        }
+        testingTaskDefinition.addVolume(hostVolume);
+
+        //mount the Volume from the sidecar container in the sidecar container task definition
+        sidecarContainer.addMountPoints({
+            containerPath: "/config",
+            readOnly: false,
+            sourceVolume: hostVolume.name
+        });
+
+        //mount the Volume from the testing container in the testing container task definition
+        /*    
         const testingEFSVolume = {
             name: "testingVolume",
             efsVolumeConfiguration: {
@@ -165,27 +165,65 @@ mount -a -t efs,nfs4 defaults
             }
         }
         testingTaskDefinition.addVolume(testingEFSVolume);
+*/
+        testingContainer.addVolumesFrom({
+            readOnly: true, 
+            sourceContainer: sidecarContainer.containerName
+        })
 
-        //Create the testing container that is going to write all the configuration files
-        const testingFargateService = new ApplicationLoadBalancedFargateService(this, "testingService", {
-            cluster: props.cluster,
-            openListener : true,
-            publicLoadBalancer : true,
-            serviceName : "testing-service",
-            taskDefinition: testingTaskDefinition
+        testingContainer.addMountPoints({
+            containerPath: "/config",
+                readOnly: false,
+                sourceVolume: hostVolume.name
         });
+/*    
+        const testingEFSVolume = {
+            name: "testingVolume",
+            efsVolumeConfiguration: {
+            fileSystemId: fileSystem.fileSystemId,
+            rootDirectory: '/nmos-testing'
+            }
+        }
+        testingTaskDefinition.addVolume(testingEFSVolume);
+*/
+
+
+        const testingService = new FargateService(this, "testingService2",{
+            cluster: props.cluster,
+            taskDefinition: testingTaskDefinition,
+            desiredCount: 1,
+            serviceName: "testing-service-2"
+        })
+
+        const loadBalancer = new ApplicationLoadBalancer(this, "testingLoadBalancer",{
+            vpc: props.vpc,
+            internetFacing:true,
+        })
+        const listener = loadBalancer.addListener('testingListener', {
+            port: 80
+        })
+        const targetGroup1 = listener.addTargets("testingTarget",{
+            port: 80,
+            targets: [testingService.loadBalancerTarget({
+                containerName: 'testingContainer',
+                containerPort: props.nmostestport
+            })]
+        })
+        const targetGroup2 = listener.addTargets("sidecarTarget", {
+            port: 80,
+            conditions: [ListenerCondition.pathPatterns(['/sidecar/*'])],
+            priority: 100,
+            targets: [testingService.loadBalancerTarget({
+                containerName: 'sidecarContainer',
+                containerPort: props.sidecarport
+            })]
+        })
+        testingService.taskDefinition.taskRole.attachInlinePolicy(accessPolicy);
     
-        testingFargateService.node.addDependency(sidecarContainerService);
+        //testingFargateService.service.taskDefinition.taskRole.attachInlinePolicy(accessPolicy);
 
         //update the security group for the EFS volume to allow the Service to connect to the EFS volume
-        fileSystem.connections.allowDefaultPortFrom(testingFargateService.service);
-
-        //mount the Volume from the testing container in the testing container task definition
-        testingContainer.addMountPoints({
-        containerPath: "/config",
-            readOnly: false,
-            sourceVolume: testingEFSVolume.name
-        });
+        //fileSystem.connections.allowDefaultPortFrom(testingFargateService.service);
         
         //Set the DNS SD settings for the nmos testing tool
         const testingDnsService = new Service(this, "nmos-testing", {
@@ -194,11 +232,12 @@ mount -a -t efs,nfs4 defaults
             dnsTtl : Duration.seconds(10)
         })
     
-        testingFargateService.service.associateCloudMapService({
-            service : testingDnsService
+        testingService.associateCloudMapService({
+            service: testingDnsService
         })
 
 
+/*
         ////////////////////////////Registry Service
         //create the Easy NMOS Registry service
         const registryTaskDefinition = new FargateTaskDefinition(this, "registryDefinition");
@@ -216,7 +255,6 @@ mount -a -t efs,nfs4 defaults
             name: "registryVolume",
             efsVolumeConfiguration: {
                 fileSystemId: fileSystem.fileSystemId,
-
                 rootDirectory: '/easy-nmos-registry/config.json'
             }
         }
@@ -239,7 +277,7 @@ mount -a -t efs,nfs4 defaults
             sourceVolume: registryEFSVolume.name
         });
 
-        registryFargateService.node.addDependency(sidecarContainerService);
+        //registryFargateService.node.addDependency(sidecarContainerService);
 
         //set the DNS SD settings for the registry service
         const registryDnsService = new Service(this, "nmos-registry", {

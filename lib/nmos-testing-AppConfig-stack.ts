@@ -66,9 +66,6 @@ export class NmosTestingAppConfigStack extends cdk.NestedStack {
             content: `
 from . import Config as CONFIG
 
-# Domain name to use for the local DNS server and mock Node
-# This must match the domain name used for certificates in HTTPS mode
-CONFIG.DNS_DOMAIN = "${props.domain}"
 
 # The testing tool uses multiple ports to run mock services. This sets the lowest of these, which also runs the GUI
 # Note that changing this from the default of 5000 also requires changes to supporting files such as

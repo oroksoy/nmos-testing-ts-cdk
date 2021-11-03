@@ -16,6 +16,7 @@ export class NMOSTestingStack extends Stack {
 
         const domain = "nmos-test";
         const nmostestport = 4000;
+        const sidecarport = 3000;
         const nmosregistryport = 8010;
         const nmosnodeport = 11000;
         let testEnvironment : {[key:string] : string} = {};
@@ -38,6 +39,7 @@ export class NMOSTestingStack extends Stack {
             hostedZoneNamespace: hostedZoneNamespace,
             cluster: cluster,
             testEnvironment: testEnvironment,
+            sidecarport: sidecarport,
             nmostestport: nmostestport,
             nmosregistryport: nmosregistryport,
             nmosnodeport: nmosnodeport
