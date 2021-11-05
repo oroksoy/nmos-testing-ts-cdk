@@ -77,7 +77,8 @@ export class NmosTestingContainerStack extends NestedStack {
         });
 
         const sidecarContainer = testingTaskDefinition.addContainer("sidecarContainer", {
-            image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository", "sidecar-container")),
+            //image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository", "sidecar-container")),
+            image: ContainerImage.fromRegistry("registry.hub.docker.com/oroksoy/nmos-sidecar"),
             environment: testEnvironment,
             portMappings: [{containerPort: props.sidecarport}],
             logging: LogDriver.awsLogs({
@@ -183,7 +184,8 @@ export class NmosTestingContainerStack extends NestedStack {
         })
 
         const registrySidecarContainer = registryTaskDefinition.addContainer("registrySidecarContainer", {
-            image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository2", "sidecar-container")),
+            //image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository2", "sidecar-container")),
+            image: ContainerImage.fromRegistry("registry.hub.docker.com/oroksoy/nmos-sidecar"),
             environment: registryEnvironment,
             portMappings: [{containerPort: props.sidecarport}],
             logging: LogDriver.awsLogs({
@@ -290,7 +292,8 @@ export class NmosTestingContainerStack extends NestedStack {
         })
 
         const nodeSidecarContainer = nodeTaskDefinition.addContainer("nodeSidecarContainer", {
-            image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository3", "sidecar-container")),
+            //image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository3", "sidecar-container")),
+            image: ContainerImage.fromRegistry("registry.hub.docker.com/oroksoy/nmos-sidecar"),
             environment: nodeEnvironment,
             portMappings: [{containerPort: props.sidecarport}],
             logging: LogDriver.awsLogs({
