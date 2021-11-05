@@ -4,8 +4,7 @@ There are several prerequisites before staring to work with the CDK.
 
 	1.  AWS CLI
 	2.  AWS CDK
-	3.  Java SDK
-	4.  Maven
+	3.  NPM
 
 
 ## AWC CLI
@@ -36,7 +35,7 @@ Download Typescript
 
 	https://www.typescriptlang.org/download
 	
-## Maven
+## NPM and Node for execution
 
 Download and install NPM and Node.js
 
@@ -88,16 +87,6 @@ If you want to deploy the updated resources the AWS CDK documentation states tha
 
 The NMOS testing tool will automatically run.  The application will create a load balancer in front of a container cluster that automatically downloads the latest amwa/nmos-testing container from the docker registry.  The container responds on port 5000 but we have mapped the container port to the load balancer port 80 because the load balancer is only going to serve this container.
 
-The CDK will output the URL's for the load balancers that front the container.  You will see DNS entries such as this:
-	
-	NmosTestingCdkStack.nmosRegistryFargateServiceLoadBalancerDNS2EED7ADF = NmosT-nmosR-1V80PMBXRIBOB-1474494761.us-east-2.elb.amazonaws.com
-
-	NmosTestingCdkStack.nmosTestingFargateServiceLoadBalancerDNS87032EF0 = NmosT-nmosT-WYO39TQYDPNX-1169112831.us-east-2.elb.amazonaws.com
-
-	NmosTestingCdkStack.nmosVirtualNodeFargateServiceLoadBalancerDNSC4F9A2F2 = NmosT-nmosV-1JVVOHQDDXGQP-230830019.us-east-2.elb.amazonaws.com
-
-
-You can also find the url for the load balancer 
 	
 	Log onto your AWS console
 	
@@ -133,6 +122,8 @@ Browse to the APIs of the NMOS Node
 
 ## Service discovery
 
+(Under Contruction.  We are working through the DNS configs for the containers and the whole enviroment.  We referred to "local" as the domain name, but will work to change that based on configuration and this readme might not keep pace with the changes at certain times.)
+
 We have taken advantage of the AWS Service Discovery functionality provided by Route 53.  Each of the containers have registered themselves in "local" hosted zone under their respective discovery names.
 
 AMWA NMOS Testing Tool
@@ -156,7 +147,16 @@ We see operational challenges in a broadcast environment with an implementation 
 
 ## Configurations
 
-The configuration file inside of the NMOS-Testing is UserConfig.py.  The code inside the CDK takes advantage of an updated NMOS-Testing that calls out to AWS AppConfig for the latest UserConfig information.  
+The nmos-testing-AppConfig-stack.ts has the configuration settings for each of the containers.  This stack puts the configuration in AWS AppConfig.  If you log into the AWS console and navigate to AppConfig, you can view the configurations for each of the different containers under different configuration versions.
+
+There is a sidecar container that is deployed with each service whose sole function is to read the configuraiton from AppConfig and create a config file in a host volume.  The main container is built to be dependent on the sidecar container finishing this activity.  The sidecar container itself listens on a path off the load balancer.
+
+http://${load-balancer-address}/sidecar will output the configuraiton that the sidecar read from AppConfig and wrote to the config file in the host mount.
+
+
+We picked AppConfig because it was built for this.  S3 could have just as easily been a pick.
+
+
 
 Enjoy!
 
