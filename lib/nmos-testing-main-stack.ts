@@ -17,34 +17,35 @@ export class NMOSTestingStack extends Stack {
         const domain = "nmos-test";
         const nmostestport = 4000;
         const sidecarport = 3000;
-        const nmosregistryport = 8010;
-        const nmosnodeport = 11000;
-        let testEnvironment : {[key:string] : string} = {};
+        const nmosregistryport = 9010;
+        const nmosnodeport = 12000;
+        let environment : {[key:string] : string} = {};
 
         this.base = new NmosTestingBaseStack(this, "BaseStack", {domain: domain});
         const {vpc, hostedZoneNamespace, cluster } = this.base;
 
-        console.log(testEnvironment);
+        console.log(environment);
         this.appconfig = new NmosTestingAppConfigStack(this, "AppConfigStack", {
             domain:domain, 
             nmostestport: nmostestport,
             registryport: nmosregistryport,
             nodeport: nmosnodeport, 
-            testEnvironment: testEnvironment});
-        console.log(testEnvironment);
+            environment: environment
+        });
+        console.log(environment);
         
         this.containers = new NmosTestingContainerStack(this, "ContainerSTack", {
             vpc: vpc,
             domain: domain,
             hostedZoneNamespace: hostedZoneNamespace,
             cluster: cluster,
-            testEnvironment: testEnvironment,
+            environment: environment,
             sidecarport: sidecarport,
             nmostestport: nmostestport,
             nmosregistryport: nmosregistryport,
             nmosnodeport: nmosnodeport
         })
-        console.log(testEnvironment);
+        console.log(environment);
 
         this.containers.addDependency(this.base);
         this.containers.addDependency(this.appconfig);

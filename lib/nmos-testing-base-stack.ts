@@ -1,9 +1,10 @@
 
 import cdk = require ('@aws-cdk/core')
-import { Vpc } from '@aws-cdk/aws-ec2'
 import { NestedStackProps, RemovalPolicy } from '@aws-cdk/core';
 import { FileSystem } from '@aws-cdk/aws-efs'
-import { Cluster } from '@aws-cdk/aws-ecs';
+import { InstanceType, Vpc } from '@aws-cdk/aws-ec2';
+import { AsgCapacityProvider, Cluster, EcsOptimizedImage } from '@aws-cdk/aws-ecs';
+import { AutoScalingGroup } from '@aws-cdk/aws-autoscaling'
 import { PrivateDnsNamespace } from '@aws-cdk/aws-servicediscovery'
 
 
@@ -23,6 +24,22 @@ export class NmosTestingBaseStack extends cdk.NestedStack {
         this.vpc = new Vpc(this, "nmos-test-vpc", {maxAzs: 2});
         
         this.cluster = new Cluster(this, 'nmos-test-cluster',{vpc: this.vpc});
+        //This has to be an EC2 Service because of directory specific host mounts
+        //We need to add capacity to the cluster
+        const autoScalingGroup = new AutoScalingGroup(this, 'cluster-asg', {
+            vpc: this.vpc,
+            instanceType: new InstanceType('t3a.xlarge'),
+            machineImage: EcsOptimizedImage.amazonLinux2(),
+            minCapacity: 1,
+            maxCapacity: 1
+        })
+        autoScalingGroup.applyRemovalPolicy(RemovalPolicy.DESTROY);
+        
+        const asgCapacityProvider = new AsgCapacityProvider(this, 'cluster-asg-capacity-provider', {
+            autoScalingGroup: autoScalingGroup,
+            enableManagedTerminationProtection: false
+        })
+        this.cluster.addAsgCapacityProvider(asgCapacityProvider);
 
         //Crete the configuration variables to use in the container configuration files
         this.hostedZoneNamespace = new PrivateDnsNamespace(this, 'nmos-test-namespace', {

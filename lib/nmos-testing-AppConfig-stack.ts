@@ -10,14 +10,13 @@ interface AppConfigProps extends NestedStackProps {
     nmostestport: number,
     registryport: number,
     nodeport: number,
-    testEnvironment: {[key:string] : string },
+    environment: {[key:string] : string },
 }
 
 export class NmosTestingAppConfigStack extends cdk.NestedStack {
 
     domain: string;
     nmostestport: number;
-    testEnvironment: {[key:string] : string };
     
     constructor(scope: cdk.Construct, id: string, props: AppConfigProps) {
         super(scope, id, props);
@@ -30,11 +29,11 @@ export class NmosTestingAppConfigStack extends cdk.NestedStack {
         let appConfig: string = "nmos-test-user-config";
         let appClientID: string = "1";
 
-        //let testEnvironment : {[key:string] : string} = {};
-        props.testEnvironment["NMOS_TEST_APPLICATION"] = appName;
-        props.testEnvironment["NMOS_TEST_ENV"] = appEnv;
-        props.testEnvironment["NMOS_TEST_CONFIG"] = appConfig;
-        props.testEnvironment["NMOS_TEST_CLIENT_ID"] = appClientID;
+        //let environment : {[key:string] : string} = {};
+        props.environment["NMOS_TEST_APPLICATION"] = appName;
+        props.environment["NMOS_TEST_ENV"] = appEnv;
+        props.environment["NMOS_TEST_CONFIG"] = appConfig;
+        props.environment["NMOS_TEST_CLIENT_ID"] = appClientID;
 
         //Create the AppConfig configuration 
         const appConfigApp = new CfnApplication(this, 'nmos-test-appconfig', {
@@ -79,10 +78,10 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
         let nmosAppConfig: string = 'easy-nmos-config';
         //let nmosAppClientID: string = '1';
 
-        props.testEnvironment["EASY_NMOS_APPLICATION"] = appName;
-        props.testEnvironment["EASY_NMOS_ENV"] = appEnv;
-        props.testEnvironment["EASY_NMOS_CONFIG"] = nmosAppConfig;
-        props.testEnvironment["EASY_NMOS_CLIENT_ID"] = appClientID;
+        props.environment["EASY_NMOS_APPLICATION"] = appName;
+        props.environment["EASY_NMOS_ENV"] = appEnv;
+        props.environment["EASY_NMOS_CONFIG"] = nmosAppConfig;
+        props.environment["EASY_NMOS_CLIENT_ID"] = appClientID;
 
         const registryConfigProfile = new CfnConfigurationProfile(this, 'nmos-registry-config-profile', {
             applicationId: appConfigApp.ref, 
@@ -102,8 +101,7 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
     "label": "nvidia-container",
     "http_port": ${props.registryport},
     "query_ws_port": 8011,
-    "registration_expiry_interval": 12,
-    "domain":${props.domain}
+    "registration_expiry_interval": 12
 }` 
         });
 
@@ -112,10 +110,10 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
         let nmosNodeConfig: string = 'easy-nmos-node-config';
         //let nmosNodeClientID: string = '1';
 
-        props.testEnvironment["EASY_NMOS_NODE_APPLICATION"] = appName;
-        props.testEnvironment["EASY_NMOS_NODE_ENV"] = appEnv;
-        props.testEnvironment["EASY_NMOS_NODE_CONFIG"] = nmosNodeConfig;
-        props.testEnvironment["EASY_NMOS_NODE_CLIENT_ID"] = appClientID
+        props.environment["EASY_NMOS_NODE_APPLICATION"] = appName;
+        props.environment["EASY_NMOS_NODE_ENV"] = appEnv;
+        props.environment["EASY_NMOS_NODE_CONFIG"] = nmosNodeConfig;
+        props.environment["EASY_NMOS_NODE_CLIENT_ID"] = appClientID
 
         const nodeConfigProfile = new CfnConfigurationProfile(this, 'nmos-node-config-profile', {
             applicationId: appConfigApp.ref, 
@@ -133,8 +131,7 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
     "http_port": ${props.nodeport},
     "events_ws_port": 11001,
     "label": "nvidia-container-node",
-    "how_many": 5,
-    "domain": ${props.domain}
+    "how_many": 5
 }`
         });
 
