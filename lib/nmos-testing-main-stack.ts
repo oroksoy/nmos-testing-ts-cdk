@@ -14,11 +14,11 @@ export class NMOSTestingStack extends Stack {
     constructor(scope: Construct, id: string, props?: StackProps) {
         super(scope, id, props);
 
-        const domain = "nmos-test";
+        const domain = "nmostest.com";
         const nmostestport = 4000;
         const sidecarport = 3000;
-        const nmosregistryport = 9010;
-        const nmosnodeport = 12000;
+        const nmosregistryport = 80;
+        const nmosnodeport = 80;
         let environment : {[key:string] : string} = {};
 
         this.base = new NmosTestingBaseStack(this, "BaseStack", {domain: domain});

@@ -15,7 +15,6 @@ interface AppConfigProps extends NestedStackProps {
 
 export class NmosTestingAppConfigStack extends cdk.NestedStack {
 
-    domain: string;
     nmostestport: number;
     
     constructor(scope: cdk.Construct, id: string, props: AppConfigProps) {
@@ -65,6 +64,7 @@ export class NmosTestingAppConfigStack extends cdk.NestedStack {
             content: `
 from . import Config as CONFIG
 
+CONFIG.DNS_DOMAIN = "${props.domain}"
 
 # The testing tool uses multiple ports to run mock services. This sets the lowest of these, which also runs the GUI
 # Note that changing this from the default of 5000 also requires changes to supporting files such as
@@ -89,6 +89,7 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
             locationUri: 'hosted'
         });
     
+        let registrywsport = props.registryport+1;
         const registryConfigProfileVersion = new CfnHostedConfigurationVersion (this, 'nmos-registry-config-profile-version',{
             applicationId: appConfigApp.ref,
             configurationProfileId: registryConfigProfile.ref,
@@ -100,8 +101,9 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
     "http_trace": false,
     "label": "nvidia-container",
     "http_port": ${props.registryport},
-    "query_ws_port": 8011,
-    "registration_expiry_interval": 12
+    "query_ws_port": ${registrywsport},
+    "registration_expiry_interval": 12,
+    "domain": "${props.domain}"
 }` 
         });
 
@@ -121,6 +123,7 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
             locationUri:'hosted'
         });
     
+        let nodewsport = props.nodeport+1;
         const nodeConfigProfileVersion = new CfnHostedConfigurationVersion (this, 'nmos-node-config-profile-version',{
             applicationId: appConfigApp.ref,
             configurationProfileId: nodeConfigProfile.ref,
@@ -129,9 +132,10 @@ CONFIG.PORT_BASE = ${props.nmostestport}`
 {
     "logging_level": 0,
     "http_port": ${props.nodeport},
-    "events_ws_port": 11001,
+    "events_ws_port": ${nodewsport},
     "label": "nvidia-container-node",
-    "how_many": 5
+    "how_many": 5,
+    "domain": "${props.domain}"
 }`
         });
 

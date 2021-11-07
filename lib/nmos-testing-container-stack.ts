@@ -3,7 +3,7 @@ import { Instance, InstanceType, InstanceClass, InstanceSize, Vpc, AmazonLinuxIm
 import { AsgCapacityProvider, Cluster, Ec2Service, Ec2TaskDefinition, EcsOptimizedImage, FargateService, NetworkMode } from '@aws-cdk/aws-ecs';
 import { FileSystem } from '@aws-cdk/aws-efs';
 import { PrivateDnsNamespace, Service } from '@aws-cdk/aws-servicediscovery';
-import { NestedStack, NestedStackProps, Construct, Duration, RemovalPolicy } from '@aws-cdk/core'
+import { NestedStack, NestedStackProps, Construct, Duration, RemovalPolicy, CfnOutput } from '@aws-cdk/core'
 import { LogGroup } from '@aws-cdk/aws-logs';
 import { FargateTaskDefinition, ContainerImage, LogDriver, ContainerDependencyCondition } from '@aws-cdk/aws-ecs'
 import { ApplicationLoadBalancedFargateService, ApplicationLoadBalancedServiceRecordType, ApplicationMultipleTargetGroupsFargateService } from '@aws-cdk/aws-ecs-patterns'
@@ -80,7 +80,7 @@ export class NmosTestingContainerStack extends NestedStack {
             //image: ContainerImage.fromEcrRepository(Repository.fromRepositoryName(this, "sidecarRepository", "sidecar-container")),
             image: ContainerImage.fromRegistry("registry.hub.docker.com/oroksoy/nmos-sidecar"),
             environment: testEnvironment,
-            portMappings: [{containerPort: props.sidecarport}],
+            portMappings: [{containerPort: props.sidecarport}, ],
             logging: LogDriver.awsLogs({
                 streamPrefix: 'Testing-Sidecar',
                 logGroup: sidecarLogGroup
@@ -160,7 +160,14 @@ export class NmosTestingContainerStack extends NestedStack {
         })
     
         testingService.associateCloudMapService({
-            service: testingDnsService
+            service: testingDnsService,
+            container: testingContainer,
+            containerPort: props.nmostestport
+        })
+
+        new CfnOutput(this, "testing-tool-lb", {
+            description: 'NMOS testing tool load balancer DNS entry',
+            value: loadBalancer.loadBalancerDnsName
         })
 
         ////////////////////////////Registry Service
@@ -175,7 +182,7 @@ export class NmosTestingContainerStack extends NestedStack {
         const registryContainer = registryTaskDefinition.addContainer("registryContainer", {
             image: ContainerImage.fromRegistry("registry.hub.docker.com/rhastie/nmos-cpp"),
             environment: registryEnvironment,
-            portMappings: [{containerPort: props.nmosregistryport}],
+            portMappings: [{containerPort: props.nmosregistryport}, {containerPort:props.nmosregistryport+1},{containerPort: 1883}],
             logging: LogDriver.awsLogs({
                 streamPrefix: 'Registry'
                 ,logGroup: testingLogGroup
@@ -266,7 +273,14 @@ export class NmosTestingContainerStack extends NestedStack {
         });
 
         registryService.associateCloudMapService({
-            service : registryDnsService
+            service : registryDnsService,
+            container: registryContainer,
+            containerPort: props.nmosregistryport
+        })
+
+        new CfnOutput(this, "registry-lb", {
+            description: 'Easy NMOS registry load balancer DNS entry',
+            value: registryLoadBalancer.loadBalancerDnsName
         })
 
 
@@ -283,7 +297,7 @@ export class NmosTestingContainerStack extends NestedStack {
         const nodeContainer = nodeTaskDefinition.addContainer("nodeContainer", {
             image: ContainerImage.fromRegistry("registry.hub.docker.com/rhastie/nmos-cpp"),
             environment: nodeEnvironment,
-            portMappings: [{containerPort: props.nmosnodeport}],
+            portMappings: [{containerPort: props.nmosnodeport}, {containerPort: props.nmosnodeport+1}],
             logging: LogDriver.awsLogs({
                 streamPrefix: 'Node'
                 ,logGroup: testingLogGroup
@@ -374,8 +388,48 @@ export class NmosTestingContainerStack extends NestedStack {
         });
 
         nodeService.associateCloudMapService({
-            service : nodeDnsService
+            service : nodeDnsService,
+            container: nodeContainer,
+            containerPort: props.nmosnodeport
         })
+
+        new CfnOutput(this, "virt-node-lb", {
+            description: 'Easy NMOS Virtual Node load balancer DNS entry',
+            value: nodeLoadBalancer.loadBalancerDnsName
+        })
+
+
+
+        ////////////container just to test the networking
+        const ami = new AmazonLinuxImage({
+            generation: AmazonLinuxGeneration.AMAZON_LINUX_2,
+            cpuType: AmazonLinuxCpuType.ARM_64
+        });
+
+
+        const mySecurityGroup = new SecurityGroup(this, 'SecurityGroup', {
+            vpc: props.vpc,
+            description: 'Allow ssh access to ec2 instances',
+            allowAllOutbound: true   // Can be set to false
+        });
+        mySecurityGroup.addIngressRule(Peer.anyIpv4(), Port.tcp(22), 'allow ssh access from the world');
+
+        const instance = new Instance(this, 'test-instance', {
+            vpc: props.vpc,
+            instanceType: InstanceType.of(InstanceClass.T4G, InstanceSize.MICRO),
+            machineImage: ami,
+            securityGroup: mySecurityGroup,
+            vpcSubnets: {subnetType: SubnetType.PUBLIC},
+            keyName: 'nmos-keypair'
+        })
+
+        nodeService.connections.allowFrom(testingService.connections, Port.tcp(props.nmosnodeport))
+        nodeService.connections.allowFrom(registryService.connections, Port.tcp(props.nmosnodeport))
+        nodeService.connections.allowFrom(instance.connections, Port.tcp(props.nmosnodeport))
+
+        registryService.connections.allowFrom(testingService.connections, Port.tcp(props.nmosregistryport))
+        registryService.connections.allowFrom(nodeService.connections, Port.tcp(props.nmosregistryport))
+        registryService.connections.allowFrom(instance.connections, Port.tcp(props.nmosregistryport))
 
 /////////////Graveyard of code
         /*
@@ -392,20 +446,6 @@ export class NmosTestingContainerStack extends NestedStack {
             }
         }
 
-        const ami = new AmazonLinuxImage({
-            generation: AmazonLinuxGeneration.AMAZON_LINUX_2,
-            cpuType: AmazonLinuxCpuType.ARM_64
-          });
-
-
-        const mySecurityGroup = new SecurityGroup(this, 'SecurityGroup', {
-            vpc: props.vpc,
-            description: 'Allow ssh access to ec2 instances',
-            allowAllOutbound: true   // Can be set to false
-          });
-        mySecurityGroup.addIngressRule(Peer.anyIpv4(), Port.tcp(22), 'allow ssh access from the world');
-
-
         let mountPoint = '/mnt/efs/fs';
         
         const userDataScript = `
@@ -421,14 +461,7 @@ test -f /sbin/mount.efs && echo ${fileSystem.fileSystemId}:/ ${mountPoint} efs d
 mount -a -t efs,nfs4 defaults
 `     
 
-        const instance = new Instance(this, 'test-instance', {
-            vpc: props.vpc,
-            instanceType: InstanceType.of(InstanceClass.T4G, InstanceSize.MICRO),
-            machineImage: ami,
-            securityGroup: mySecurityGroup,
-            vpcSubnets: {subnetType: SubnetType.PUBLIC},
-            keyName: 'nmos-keypair'
-        })
+       
 
         fileSystem.connections.allowDefaultPortFrom(instance);
         instance.addUserData(userDataScript)
